@@ -1,0 +1,53 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ $# -ne 3 ] && [ $# -ne 2 ]; then
+	echo "Usage: $0 <instance-id> <hostname> <outputiso>"
+	echo "OR"
+	echo "Usage: $0 /path/to/cidata/dir <outputiso>"
+	exit
+fi
+
+if [ $# = 3 ]; then
+	instance_id=$1; shift
+	hostname=$1; shift
+	outputiso=$1; shift
+
+	dir=$(mktemp -d)
+
+	cat > $dir/meta-data << EOF
+instance-id: $instance_id
+local-hostname: $hostname
+EOF
+
+	cat > $dir/user-data << EOF
+#cloud-config
+user: cloud-user
+password: atomic
+chpasswd: {expire: False}
+ssh_pwauth: True
+disable_root: False
+ssh_authorized_keys:
+    - $(cat ~/.ssh/id_rsa.pub)
+EOF
+
+	trap "rm -rf $dir" EXIT
+else
+	dir=$1; shift
+	outputiso=$1; shift
+fi
+
+SUDO=
+if [ $UID != 0 ] && ! touch $(dirname $outputiso) &>/dev/null; then
+    SUDO=sudo
+fi
+
+$SUDO genisoimage \
+	-input-charset default \
+	-output "$outputiso" \
+	-volid cidata \
+	-joliet \
+	-rock \
+	-quiet \
+	$dir/user-data \
+	$dir/meta-data

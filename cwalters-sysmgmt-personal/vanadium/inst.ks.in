@@ -1,0 +1,54 @@
+#--coreos-virt-install-disk-size-gb: 40
+# Colin's kickstart for Silverblue that
+# sets up a split / and /var with XFS reflink=1 enabled,
+# both ssh and password, and passwordless sudo.
+lang en_US.UTF-8
+keyboard us
+timezone America/New_York
+zerombr
+clearpart --all --initlabel --disklabel=gpt
+reqpart --add-boot
+part pv.01 --grow
+volgroup vg0 pv.01
+# 20GB is large enough for the base OS
+logvol / --size=20000 --fstype="xfs" --mkfsoptions="-m reflink=1" --name=root --vgname=vg0
+# If we're installing into a large system, let's only use 250GB
+# and let the admin resize the rest later.
+logvol /var --size=3000 --grow --maxsize 250000 --fstype="xfs" --mkfsoptions="-m reflink=1" --name=var --vgname=vg0
+# I don't keep much in /home; it's mostly for personal/secret data.
+# I keep other stuff in /var/srv/walters
+logvol /var/home --size=5000 --encrypted --passphrase "@PASSPHRASE@" --fstype="xfs" --mkfsoptions="-m reflink=1" --name=varhome --vgname=vg0
+# sudo user with an ssh key (use your key)
+user --name=walters --groups=wheel --iscrypted --gecos "Colin Walters" --password "@PASSWORD@"
+sshkey --username walters "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOQkQHeKan3X+g1jILw4a3KtcfEIED0kByKGWookU7ev walters+2015-general@verbum.org"
+
+# Install from the ISO media
+ostreesetup --osname="sb" --remote="fedora" --url="file:///ostree/repo" --ref="fedora/29/x86_64/silverblue" --nogpg
+
+reboot
+
+%post --erroronfail
+ostree remote delete fedora
+ostree remote add --set=gpg-verify=true --set=gpgkeypath=/etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-28-primary fedora 'https://kojipkgs.fedoraproject.org/atomic/repo/'
+sed -i 's,Defaults\\s*requiretty,Defaults !requiretty,' /etc/sudoers
+echo '%wheel ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/wheel-nopasswd
+
+# More secure ssh defaults: https://stribika.github.io/2015/01/04/secure-secure-shell.html
+# Also, a tweak for Fedora/Red Hat OpenSSH to *only* generate ED25519 host keys.
+for line in \
+      "KexAlgorithms curve25519-sha256@libssh.org" \
+      "Ciphers chacha20-poly1305@openssh.com" \
+      "MACs hmac-sha2-512-etm@openssh.com" \
+      "GSSAPIAuthentication no" \
+      "PasswordAuthentication no"; do \
+        if ! grep -q "$line" /etc/ssh/sshd_config; then \
+          echo $line >> /etc/ssh/sshd_config; \
+        fi \
+      done
+# And it's ok to run ssh without password authentication on
+systemctl enable sshd
+
+if ! test -L /etc/resolv.conf; then
+  ln -sfr /run/NetworkManager/resolv.conf /etc/resolv.conf
+fi
+%end

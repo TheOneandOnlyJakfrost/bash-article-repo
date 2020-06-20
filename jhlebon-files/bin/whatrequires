@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+# A more powerful `rpm -q --whatrequires` which actually
+# queries capabilities rather than just pkgname.
+
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 [-v|--verbose] [--dbpath PATH] PKG [PKG...]"
+    exit 0
+fi
+
+base=$(basename $0)
+
+# We could merge the two, so that they're both reported
+# together. Though e.g. RHEL7 doesn't know --whatrecommends
+if [ $base != whatrequires ] && \
+   [ $base != whatrecommends ]; then
+    echo "Bad script name: $base (not whatrequires or whatrecommends)"
+fi
+
+verbose=0
+capreqs=
+pkgreqs=
+dbpath=/var/lib/rpm
+while [ $# -ne 0 ]; do
+    if [ "$1" == "-v" ] || [ "$1" == "--verbose" ]; then
+        verbose=1; shift; continue
+    elif [ "$1" == "--dbpath" ]; then
+        dbpath=$2; shift; shift; continue
+    fi
+    pkg=$1; shift
+    rpm --dbpath "$dbpath" -q "$pkg" || continue
+    while IFS='' read -r cap || [[ -n $cap ]]; do
+        cap=${cap% = *}
+        if rpm --dbpath "$dbpath" --quiet -q --$base "$cap"; then
+            while IFS='' read -r pkgreq || [[ -n $pkgreq ]]; do
+                capreqs="$capreqs\n$cap: $pkgreq"
+                pkgreqs="$pkgreqs\n$pkgreq"
+            done < <(rpm --dbpath "$dbpath" -q --$base "$cap")
+        fi
+    done < <(cat <(echo "$pkg") <(rpm --dbpath "$dbpath" -ql --provides $pkg))
+done
+
+if [ -n "$capreqs" ]; then
+    if [ $verbose == 0 ]; then
+        echo -e "$pkgreqs" | sort | uniq
+    else
+        echo
+        echo "Summary:"
+        echo -e "$pkgreqs" | sort | uniq
+        echo
+        echo "Detailed:"
+        echo -e "$capreqs" | sort | uniq
+    fi
+fi

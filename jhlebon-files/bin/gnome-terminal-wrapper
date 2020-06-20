@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+# This script is a workaround for:
+# https://bugzilla.gnome.org/show_bug.cgi?id=707899#c4
+# It requires tmux to be installed.
+
+# Essentially, spawning e.g. `gnome-terminal --command vim` will not behave as
+# you expect: the vim process is actually owned by gnome-terminal-server, and
+# the gnome-terminal process itself exits right away. This makes it useless in
+# situations where we want to determine when vim exits by waiting on
+# gnome-terminal.
+
+# The hack implemented here uses tmux to create a new session containing the
+# process we want to execute, spawn gnome-terminal to attach to it, and then
+# block until the started process finishes.
+
+tmpf=$(mktemp)
+trap "rm -f $tmpf" EXIT
+session=$(tmux new -d -P flock $tmpf "$@")
+gnome-terminal --command "tmux attach -t $session"
+flock $tmpf true

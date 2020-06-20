@@ -1,0 +1,14 @@
+# Heavily lifted from https://github.com/sameersbn/docker-squid
+FROM registry.fedoraproject.org/fedora:27
+RUN dnf -y install squid httpd-tools && \
+    dnf clean all && \
+    mkdir -p /var/spool/squid && \
+    mkdir -p /var/log/squid && \
+    chmod -R 755 /var/log/squid && \
+    chown -R squid:squid /var/log/squid && \
+    chown -R squid:squid /var/spool/squid && \
+    /usr/sbin/squid -N -f /etc/squid/squid.conf -z
+COPY squid-unauth.conf /etc/squid/squid.conf
+EXPOSE 3128
+ENTRYPOINT [ "/usr/sbin/squid" ]
+CMD [ "-f", "/etc/squid/squid.conf", "-NCY" ]

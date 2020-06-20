@@ -1,0 +1,265 @@
+# .bashrc
+
+# Source global definitions
+if [ -f /etc/bashrc ]; then
+    . /etc/bashrc
+fi
+
+### FUNCTIONS ###
+
+# command for writing command history out
+function prompt_command {
+    if [ $(($SECONDS - $LAST_HISTORY_WRITE)) -gt 60 ]; then
+        history -a && history -c && history -r
+        LAST_HISTORY_WRITE=$SECONDS
+    fi
+}
+
+# Unset all the OpenStack vars
+# https://stackoverflow.com/a/5976494/6257168
+function UnsetOpenStack()
+{
+    for i in $(echo "${!OS_*}"); do
+        unset $i
+    done
+}
+
+# Retrieve the IP address for a VM
+function GetVmIp()
+{
+    MAC=`sudo virsh dumpxml $1 | grep 'mac address' | awk -F\' '{print $2}'`
+    ip neigh | grep $MAC | awk '{print $1}'
+}
+
+# undefine a VM and remove the qcow2
+function RemoveVm()
+{
+    if [ -z "$1" ]; then
+        printf "Please provide a VM name\n"
+    else
+        STATE=$(virsh dominfo $1 | grep State | awk '{print $2}')
+        if [ "$STATE" = "running" ]; then
+            virsh destroy $1
+        fi
+        QCOW=$(virsh dumpxml $1 | grep -m 1 -F .qcow2 | cut -d "'" -f2)
+        sudo rm $QCOW
+        virsh undefine $1
+    fi
+}
+
+# Get latest RHCOS AMI
+function rhcos()
+{
+   local latest_build
+   latest_build=$(curl -L -s https://releases-redhat-coreos.cloud.paas.upshift.redhat.com/storage/releases/maipo/builds.json | podman run --rm -i docker.io/miabbott/aht-tools jq -r .builds[0])
+   local us_east_1
+   us_east_1=$(curl -L -s https://releases-redhat-coreos.cloud.paas.upshift.redhat.com/storage/releases/maipo/$latest_build/meta.json | podman run --rm -i docker.io/miabbott/aht-tools jq -r .amis[0].hvm)
+   echo "${us_east_1}"
+}
+
+## coreos-assembler
+# Old function
+#function coreos-assembler() {
+#    env | grep COREOS_ASSEMBLER
+#    set -x # so we can see what command gets run
+#    sudo chrt --idle 0 podman run --rm -ti -v ${PWD}:/srv/ --userns=host --device /dev/kvm --name coreos-assembler --net=host \
+#              --tmpfs /tmp -v /var/tmp:/var/tmp \
+#               ${COREOS_ASSEMBLER_PRIVILEGED:+--privileged}                                          \
+#               ${COREOS_ASSEMBLER_CONFIG_GIT:+-v $COREOS_ASSEMBLER_CONFIG_GIT:/srv/src/config/:ro}   \
+#               ${COREOS_ASSEMBLER_GIT:+-v $COREOS_ASSEMBLER_GIT/src/:/usr/lib/coreos-assembler/:ro}  \
+#               ${COREOS_ASSEMBLER_CONTAINER_RUNTIME_ARGS}                                            \
+#               ${COREOS_ASSEMBLER_CONTAINER:-quay.io/coreos-assembler/coreos-assembler:latest} $@
+#    rc=$?; set +x; return $rc
+#}
+function coreos-assembler() {
+   env | grep COREOS_ASSEMBLER
+   set -x # so we can see what command gets run
+   chrt --idle 0 podman run --rm -ti --security-opt label=disable --privileged                      \
+              --uidmap=1000:0:1 --uidmap=0:1:1000 --uidmap 1001:1001:64536                          \
+              -v ${PWD}:/srv/ --device /dev/kvm --device /dev/fuse                                  \
+              --tmpfs /tmp -v /var/tmp:/var/tmp --name coreos-assembler                             \
+              ${COREOS_ASSEMBLER_CONFIG_GIT:+-v $COREOS_ASSEMBLER_CONFIG_GIT:/srv/src/config/:ro}   \
+              ${COREOS_ASSEMBLER_GIT:+-v $COREOS_ASSEMBLER_GIT/src/:/usr/lib/coreos-assembler/:ro}  \
+              ${COREOS_ASSEMBLER_CONTAINER_RUNTIME_ARGS}                                            \
+              ${COREOS_ASSEMBLER_CONTAINER:-quay.io/coreos-assembler/coreos-assembler:latest} $@
+   rc=$?; set +x; return $rc
+}
+
+
+
+
+# prep a dir for building with cosa
+function cosa_prep_dir()
+{
+    if [ -z "$1" ]; then
+        echo "Need to specify directory"
+        return 1
+    fi
+
+    set -x
+    local workdir
+    workdir=$1
+    sudo mkdir -p "${workdir}"
+    sudo setfacl -m u:1000:rwx  "${workdir}"
+    sudo setfacl -d -m u:1000:rwx "${workdir}"
+    sudo chcon system_u:object_r:container_file_t:s0 "${workdir}"
+    pushd "${workdir}"
+    set +x
+}
+
+# pet container
+function MyPrecious()
+{
+    if [ -z "$1" ]; then
+        echo "Need to specify release version"
+        return 1
+    fi
+
+    sudo chrt --idle 0 podman run --net=host --rm -it --privileged \
+                                  -v $KRB5CCNAME:$KRB5CCNAME:z \
+                                  -v /var/srv:/var/srv \
+                                  -v /var/cache/dnf:/var/cache/dnf \
+                                  -v $HOME:/home/miabbott \
+                                  -v /etc/localtime:/etc/localtime \
+                                  --device /dev/kvm \
+                                  localhost/miabbott/myprecious:$1
+}
+
+### ENV VARS ###
+
+# Configuring command history
+# https://www.digitalocean.com/community/tutorials/how-to-use-bash-history-commands-and-expansions-on-a-linux-vps
+HISTTIMEFORMAT="%Y-%b-%d %T "
+# https://www.happyassassin.net/2015/01/16/bash-history-with-multiple-sessions/
+HISTSIZE=1048576
+HISTFILESIZE=1048576
+LAST_HISTORY_WRITE=$SECONDS
+PROMPT_COMMAND="$PROMPT_COMMAND; prompt_command"
+
+# setup for rcm_messages
+export KRB5CCNAME=/tmp/krb5cc_miabbott
+
+# Define default LIBVIRT connection
+export LIBVIRT_DEFAULT_URI=qemu:///system
+
+# display git branch in prompt
+# https://github.com/jimeh/git-aware-prompt
+export GITAWAREPROMPT=~/.bash/git-aware-prompt
+source "${GITAWAREPROMPT}/main.sh"
+
+# colorize prompt, drop user@hostname portion because this is for my local account
+export PS1="[\[\033[01;32m\]\u@\h \[\033[01;34m\]\w\[\033[00m\] \[$txtcyn\]\$git_branch\[$txtred\]\$git_dirty\[$txtrst\]]\$ "
+
+# indicate if we are in container
+# of course jlebon has the better solution
+# https://github.com/jlebon/files/blob/master/dotfiles/.bashrc#L222
+__in_dockerenv=no
+if [ -f /.dockerenv ] || [ -f /run/.containerenv ]; then
+    __in_dockerenv=yes
+fi
+
+if [[ "$__in_dockerenv" == yes ]]; then
+    export PS1="[\[\033[01;32m\]\u@\h \[$txtred\](container) \[\033[01;34m\]\w\[\033[00m\] \[$txtcyn\]\$git_branch\[$txtred\]\$git_dirty\[$txtrst\]]\$ "
+fi
+
+# add jlebon files to PATH
+export PATH="$PATH:/home/miabbott/workspaces/jlebon/files/bin"
+
+# Configure Go
+export GOPATH=~/workspaces/go
+export PATH="$PATH:$GOPATH/bin"
+
+# OpenShift installer
+export AWS_PROFILE=openshift-dev
+
+# force a reasonable TERM
+# helps with vim + tmux + line highlighting
+export TERM=xterm-256color
+
+### ALIASES
+
+# User specific aliases and functions
+alias sshq="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+alias scpq="scp -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+alias sshk="ssh -o PreferredAuthentications=keyboard-interactive,password -o PubkeyAuthentication=no -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+
+alias unset-openstack=UnsetOpenStack
+
+# Choose Openstack instance/tenant
+alias rhos="UnsetOpenStack; source ~/rhos.sh"
+alias rhos-testing="UnsetOpenStack; source ~/rhos-testing.sh"
+
+# Flush ARP cache
+alias flush-arp="ip -s -s neigh flush all"
+
+# Use 'sudo' with aliases
+# http://askubuntu.com/a/22043
+alias sudo="sudo "
+
+# Retrieve IP of libvirt VM
+alias get-vm-ip=GetVmIp
+
+# Destroy and remove libvirt VM + image
+alias remove-vm=RemoveVm
+
+# get ip from vagrant box
+alias vagrantip="vagrant ssh -c \"ip address show eth0 | grep 'inet ' | sed -e 's/^.*inet //' -e 's/\/.*$//'\""
+
+# aliases for frequently used dirs
+alias aht="pushd ~/workspaces/projectatomic/atomic-host-tests/"
+alias acj="pushd ~/workspaces/atomic-ci-jobs/"
+alias installer="pushd ~/workspaces/go/src/github.com/openshift/installer"
+
+# Run htop in a container
+alias htop="sudo chrt --idle 0 podman run -it --rm --pid=host quay.io/miabbott/htop"
+
+# Run glances in a container
+alias glances="sudo chrt --idle 0 podman run -it --rm --pid=host localhost/miabbott/glances"
+
+# handy for doing local ostree tests
+alias ost="ostree --repo=repo"
+
+# coreos-assembler
+#alias coreos-assembler="chrt --idle 0 podman run --rm --net=host -ti --privileged --userns=host -v $(pwd):/srv --workdir /srv quay.io/coreos-assembler/coreos-assembler"
+alias local-ca="chrt --idle 0 podman run --rm --net=host -ti --privileged --userns=host -v $(pwd):/srv --workdir /srv localhost/miabbott/coreos-assembler"
+alias dev-ca="chrt --idle 0 podman run --rm --net=host -ti --privileged --userns=host -v /home/miabbott/workspaces/coreos/coreos-assembler/src:/usr/lib/coreos-assembler:ro -v $(pwd):/srv --workdir /srv localhost/miabbott/coreos-assembler"
+
+# provide alias for jq when not in container
+if [[ "$__in_dockerenv" != yes ]]; then
+    alias jq="chrt --idle 0 podman run --rm -i quay.io/miabbott/jq"
+fi
+
+# pet container
+alias myprecious=MyPrecious
+
+### ERRATA ###
+
+# disable ctrl-s - suspend terminal
+stty -ixon
+
+# Git tab completion
+# https://github.com/git/git/blob/master/contrib/completion/git-completion.bash
+source ~/git-completion.bash
+
+# Default to CI-RHOS Testing tenant
+source ~/rhos-testing.sh
+
+# unset USER/USERNAME to work with keystoneclient (but why?!?!?!)
+#unset USER
+#unset USERNAME
+
+# Putting this here because I don't have an Ansible playbook to setup my workstation
+#$ sudo cat /etc/polkit-1/rules.d/80-libvirt-manage.rules
+#// https://goldmann.pl/blog/2012/12/03/configuring-polkit-in-fedora-18-to-access-virt-manager/
+#polkit.addRule(function(action, subject) {
+#  if (action.id == "org.libvirt.unix.manage" && subject.local && subject.active && subject.isInGroup("wheel")) {
+#      return polkit.Result.YES;
+#  }
+#});
+#
+
+# The next line updates PATH for the Google Cloud SDK.
+if [ -f '/home/miabbott/Downloads/google-cloud-sdk/path.bash.inc' ]; then . '/home/miabbott/Downloads/google-cloud-sdk/path.bash.inc'; fi
+
+# The next line enables shell command completion for gcloud.
+if [ -f '/home/miabbott/Downloads/google-cloud-sdk/completion.bash.inc' ]; then . '/home/miabbott/Downloads/google-cloud-sdk/completion.bash.inc'; fi

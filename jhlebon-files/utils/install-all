@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+if [[ $0 != "utils/install-all" ]]; then
+	echo "ERROR: Must be run from repo root." >&2
+	exit 1
+fi
+
+if [ $# -ne 0 ]; then
+	echo "Save all installed files in stash and replace with repo files."
+	echo "Usage: $0"
+	exit
+fi
+
+cat <(find dotfiles -not -type d) \
+    <(find bin -not -type d) \
+    <(find complete -not -type d) | xargs utils/install

@@ -1,0 +1,60 @@
+#!/bin/bash
+set -euo pipefail
+
+# grepx will run grep -Inr on the search term and save the results to a file.
+# grepxi will open vim with the results set as the quicklist. If specific
+# numbers are specified to grepxi, then only those search results will be in
+# the quicklist.
+
+# check what we were launched as
+prog=$(basename $0)
+
+LAST="$HOME/.cache/grepx.last"
+QUICKLIST="$HOME/.cache/grepxi.quicklist"
+mkdir -p "$HOME/.cache"
+
+if [ "$prog" == "grepx" ] || [ "$prog" == "gitgrepx" ]; then
+	if [ "$prog" == "gitgrepx" ]; then
+		grepper="git grep -I --color=never"
+	else
+		grepper="grep -Inr --color=never --exclude-dir=.git"
+	fi
+	$grepper "$@" > $LAST
+	$grepper --color=always "$@" | nl --number-width=1 | less -RFX
+else
+	if [ ! -f "$LAST" ]; then
+		echo "You must run grepx first."
+		exit 1
+	fi
+
+	if [ $# -eq 0 ]; then
+		cp $LAST $QUICKLIST
+	else
+		rm -f $QUICKLIST
+		while [ $# -ne 0 ]; do
+			if [[ $1 != *[!0-9]* ]]; then
+				x=$(tail -n +$1 $LAST)
+				y=$(head -n 1 <<< "$x")
+				echo "$y" >> $QUICKLIST
+			else
+				echo "Usage: $0 [resultline]..."
+				exit 1
+			fi
+			shift
+		done
+	fi
+
+	# Open vim in quicklist mode
+	vim_args="-q $QUICKLIST"
+
+	# If there's more than one item in the list, open the quicklist window
+	if [ "$(wc -l < $QUICKLIST)" -gt 1 ]; then
+		vim_args="$vim_args -c cw"
+	fi
+
+	VIM=vim
+	if [ -x /usr/bin/vimx ]; then
+		VIM=vimx
+	fi
+	$VIM $vim_args
+fi

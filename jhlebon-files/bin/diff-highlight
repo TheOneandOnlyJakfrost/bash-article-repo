@@ -1,0 +1,308 @@
+#!/usr/bin/perl
+
+# NB: This is a modified version of the diff-highlight
+# script that ships with git. It adds highlighting of lines
+# on unmatched hunks. For more details, see:
+#   http://marc.info/?l=git&m=144651639126833
+
+use 5.008;
+use warnings FATAL => 'all';
+use strict;
+
+# Highlight by reversing foreground and background. You could do
+# other things like bold or underline if you prefer.
+my @OLD_HIGHLIGHT = (
+	color_config('color.diff-highlight.oldnormal'),
+	color_config('color.diff-highlight.oldhighlight', "\x1b[7m"),
+	color_config('color.diff-highlight.oldreset', "\x1b[27m")
+);
+my @NEW_HIGHLIGHT = (
+	color_config('color.diff-highlight.newnormal', $OLD_HIGHLIGHT[0]),
+	color_config('color.diff-highlight.newhighlight', $OLD_HIGHLIGHT[1]),
+	color_config('color.diff-highlight.newreset', $OLD_HIGHLIGHT[2])
+);
+
+my $MAX_HUNK_SIZE = config('diff-highlight.maxhunksize', 20);
+
+my $RESET = "\x1b[m";
+my $COLOR = qr/\x1b\[[0-9;]*m/;
+my $BORING = qr/$COLOR|\s/;
+
+my @removed;
+my @added;
+my $in_hunk;
+
+# Some scripts may not realize that SIGPIPE is being ignored when launching the
+# pager--for instance scripts written in Python.
+$SIG{PIPE} = 'DEFAULT';
+
+while (<>) {
+	if (!$in_hunk) {
+		print;
+		$in_hunk = /^$COLOR*\@/;
+	}
+	elsif (/^$COLOR*-/) {
+		push @removed, $_;
+	}
+	elsif (/^$COLOR*\+/) {
+		push @added, $_;
+	}
+	else {
+		show_hunk(\@removed, \@added);
+		@removed = ();
+		@added = ();
+
+		print;
+		$in_hunk = /^$COLOR*[\@ ]/;
+	}
+
+	# Most of the time there is enough output to keep things streaming,
+	# but for something like "git log -Sfoo", you can get one early
+	# commit and then many seconds of nothing. We want to show
+	# that one commit as soon as possible.
+	#
+	# Since we can receive arbitrary input, there's no optimal
+	# place to flush. Flushing on a blank line is a heuristic that
+	# happens to match git-log output.
+	if (!length) {
+		local $| = 1;
+	}
+}
+
+# Flush any queued hunk (this can happen when there is no trailing context in
+# the final diff of the input).
+show_hunk(\@removed, \@added);
+
+exit 0;
+
+# Ideally we would feed the default as a human-readable color to
+# git-config as the fallback value. But diff-highlight does
+# not otherwise depend on git at all, and there are reports
+# of it being used in other settings. Let's handle our own
+# fallback, which means we will work even if git can't be run.
+sub color_config {
+	my ($key, $default) = @_;
+	my $s = `git config --get-color $key 2>/dev/null`;
+	return length($s) ? $s : $default;
+}
+
+# Also handle our own fallback here to be independent.
+sub config {
+	my ($key, $default) = @_;
+	my $s = `git config --get $key 2>/dev/null`;
+	return length($s) ? $s : $default;
+}
+
+sub show_hunk {
+	my ($a, $b) = @_;
+
+	# If one side is empty, then there is nothing to compare or highlight.
+	if (!@$a || !@$b) {
+		print @$a, @$b;
+		return;
+	}
+
+	# Skip highlighting if the hunk gets bigger than the user configured
+	# limit.
+	if (@$a > $MAX_HUNK_SIZE || @$b > $MAX_HUNK_SIZE) {
+		print @$a, @$b;
+		return;
+	}
+
+	my @queue;
+	match_and_highlight_pairs($a, 0, scalar @$a, $b, 0, scalar @$b, \@queue);
+	print @queue;
+}
+
+# Here, we try to be clever and match up similar lines. I.e. we try to
+# find which lines in the `rem` lines (array a) became which other lines
+# in the `add` lines (array b). To do this, we use a recursive algorithm
+# that works as follow:
+# 	1. Find the most similar pair of lines in all possible pairs
+# 	2. Do a recursive call to find the most similar pair of lines in all
+# 	   pairs, restricted to lower indices
+# 	3. Print the `rem` line of the best pair
+# 	4. Queue the `add` line of the best pair
+# 	5. Do a recursive call to find the most similar pair of lines in all
+# 	   pairs, restricted to higher indices
+sub match_and_highlight_pairs {
+	my ($a, $a_first, $a_last, $b,  $b_first, $b_last, $queue) = @_;
+
+	# base case: no more rem or add lines to pair up
+	if ($a_first >= $a_last || $b_first >= $b_last) {
+
+		# flush out any remaining rem lines
+		for (my $i = $a_first; $i < $a_last; $i++) {
+			print $a->[$i];
+		}
+
+		# queue up any remaining add lines
+		for (my $i = $b_first; $i < $b_last; $i++) {
+			push @$queue, $b->[$i];
+		}
+
+		return;
+	}
+
+	# prime the loop
+	my ($besti, $bestj) = ($a_first, $b_first);
+	my $bestn = calculate_match($a->[$a_first], $b->[$b_first]) + 1;
+
+	for (my $i = $a_first; $i < $a_last; $i++) {
+		for (my $j = $b_first; $j < $b_last; $j++) {
+			my $n = calculate_match($a->[$i], $b->[$j]);
+			if ($n < $bestn) {
+				($besti, $bestj, $bestn) = ($i, $j, $n);
+			}
+		}
+	}
+
+	# find the best matches in the lower pairs
+	match_and_highlight_pairs($a, $a_first, $besti, $b, $b_first, $bestj, $queue);
+
+	my ($rm, $add) = highlight_pair($a->[$besti], $b->[$bestj]);
+	print $rm;
+	push @$queue, $add;
+
+	# find the best matches in the higher pairs
+	match_and_highlight_pairs($a, $besti+1, $a_last, $b, $bestj+1, $b_last, $queue);
+}
+
+# A measure of how well the two lines passed match up. The smaller the
+# returned value, the better the match. The current implementation uses
+# a simple heuristic which tries to minimize the overall diff between
+# the two lines considering only their common prefix and suffix.
+sub calculate_match {
+	my @a = split_line(shift);
+	my @b = split_line(shift);
+
+	my ($pa, $pb) = find_common_prefix(\@a, \@b);
+	my ($sa, $sb) = find_common_suffix(\@a, $pa, \@b, $pb);
+
+	return ($sa - $pa) + ($sb - $pb);
+}
+
+sub highlight_pair {
+	my @a = split_line(shift);
+	my @b = split_line(shift);
+
+	my ($pa, $pb) = find_common_prefix(\@a, \@b);
+	my ($sa, $sb) = find_common_suffix(\@a, $pa, \@b, $pb);
+
+	if (is_pair_interesting(\@a, $pa, $sa, \@b, $pb, $sb)) {
+		return highlight_line(\@a, $pa, $sa, \@OLD_HIGHLIGHT),
+		       highlight_line(\@b, $pb, $sb, \@NEW_HIGHLIGHT);
+	}
+	else {
+		return join('', @a),
+		       join('', @b);
+	}
+}
+
+sub split_line {
+	local $_ = shift;
+	return utf8::decode($_) ?
+		map { utf8::encode($_); $_ }
+			map { /$COLOR/ ? $_ : (split //) }
+			split /($COLOR+)/ :
+		map { /$COLOR/ ? $_ : (split //) }
+		split /($COLOR+)/;
+}
+
+sub find_common_prefix {
+	my ($a, $b) = @_;
+
+	# Take care to skip any ansi color codes.
+	my $seen_plusminus;
+	my ($pa, $pb) = (0, 0);
+	while ($pa < @$a && $pb < @$b) {
+		if ($a->[$pa] =~ /$COLOR/) {
+			$pa++;
+		}
+		elsif ($b->[$pb] =~ /$COLOR/) {
+			$pb++;
+		}
+		elsif ($a->[$pa] eq $b->[$pb]) {
+			$pa++;
+			$pb++;
+		}
+		elsif (!$seen_plusminus && $a->[$pa] eq '-' && $b->[$pb] eq '+') {
+			$seen_plusminus = 1;
+			$pa++;
+			$pb++;
+		}
+		else {
+			last;
+		}
+	}
+
+	return $pa, $pb;
+}
+
+sub find_common_suffix {
+	my ($a, $pa, $b, $pb) = @_;
+
+	# Take care to skip any ansi color codes.
+	my ($sa, $sb) = ($#$a, $#$b);
+	while ($sa >= $pa && $sb >= $pb) {
+		if ($a->[$sa] =~ /$COLOR/) {
+			$sa--;
+		}
+		elsif ($b->[$sb] =~ /$COLOR/) {
+			$sb--;
+		}
+		elsif ($a->[$sa] eq $b->[$sb]) {
+			$sa--;
+			$sb--;
+		}
+		else {
+			last;
+		}
+	}
+
+	return $sa, $sb;
+}
+
+sub highlight_line {
+	my ($line, $prefix, $suffix, $theme) = @_;
+
+	my $start = join('', @{$line}[0..($prefix-1)]);
+	my $mid = join('', @{$line}[$prefix..$suffix]);
+	my $end = join('', @{$line}[($suffix+1)..$#$line]);
+
+	# If we have a "normal" color specified, then take over the whole line.
+	# Otherwise, we try to just manipulate the highlighted bits.
+	if (defined $theme->[0]) {
+		s/$COLOR//g for ($start, $mid, $end);
+		chomp $end;
+		return join('',
+			$theme->[0], $start, $RESET,
+			$theme->[1], $mid, $RESET,
+			$theme->[0], $end, $RESET,
+			"\n"
+		);
+	} else {
+		return join('',
+			$start,
+			$theme->[1], $mid, $theme->[2],
+			$end
+		);
+	}
+}
+
+# Pairs are interesting to highlight only if we are going to end up
+# highlighting a subset (i.e., not the whole line). Otherwise, the highlighting
+# is just useless noise. We can detect this by finding either a matching prefix
+# or suffix (disregarding boring bits like whitespace and colorization).
+sub is_pair_interesting {
+	my ($a, $pa, $sa, $b, $pb, $sb) = @_;
+	my $prefix_a = join('', @$a[0..($pa-1)]);
+	my $prefix_b = join('', @$b[0..($pb-1)]);
+	my $suffix_a = join('', @$a[($sa+1)..$#$a]);
+	my $suffix_b = join('', @$b[($sb+1)..$#$b]);
+
+	return $prefix_a !~ /^$COLOR*-$BORING*$/ ||
+	       $prefix_b !~ /^$COLOR*\+$BORING*$/ ||
+	       $suffix_a !~ /^$BORING*$/ ||
+	       $suffix_b !~ /^$BORING*$/;
+}

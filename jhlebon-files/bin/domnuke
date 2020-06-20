@@ -1,0 +1,55 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]; then
+	echo "Usage: $0 <domain> [domain...]"
+	exit
+fi
+
+get_running_domains ()
+{
+	virsh list --name
+}
+
+get_all_domains ()
+{
+	virsh list --all --name
+}
+
+# $1 - domain name
+domain_running ()
+{
+	local domain
+	for domain in $(get_running_domains); do
+		if [[ $domain == $1 ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# $1 - domain name
+domain_exists ()
+{
+	local domain
+	for domain in $(get_all_domains); do
+		if [[ $domain == $1 ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+while [ $# -ne 0 ]; do
+	dom=$1; shift
+
+	if ! domain_exists $dom; then
+		echo "ERROR: Domain $dom does not exist."
+		exit 1
+	fi
+
+	if domain_running $dom; then
+		virsh destroy $dom
+	fi
+
+	virsh undefine --remove-all-storage $dom
+done

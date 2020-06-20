@@ -1,0 +1,49 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+# reword any commit, rather than just HEAD
+
+# we reuse the rebase machinery so that users are familiar with the semantics
+# and how to --abort the operation if something goes wrong
+
+if [ $# -eq 1 ]; then
+    in_rebase=0
+elif [ $# -eq 3 ] && [ $1 == _rebase_ ]; then
+    in_rebase=1
+else
+    echo "Usage: $0 <REVISION>"
+    exit 0
+fi
+
+self=$0
+
+if [ $in_rebase == 0 ]; then
+
+    # do this at the user-facing level
+
+    rev_target=$1
+    rev_target=$(git rev-parse $rev_target)
+
+    # remember what the original editor was set to so that we can restore it for
+    # the reword operation
+    export GIT_EDITOR_ORIG=$(git var GIT_EDITOR)
+    editor="$0 _rebase_ $rev_target"
+
+    # corner-case; handle fixing up against the first commit
+    if [ $(git rev-list --count $rev_target) == 1 ]; then
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        git -c core.editor="$editor" rebase -q -i --root $branch
+    else
+        git -c core.editor="$editor" rebase -q -i $rev_target^
+    fi
+else
+
+    # do this in the rebase
+
+    rev_target=$2
+    rebase_file=$3
+
+    sed -i "/^pick ${rev_target::7}/ a exec \
+            git -c core.editor=\"$GIT_EDITOR_ORIG\" \
+            commit -q --amend" $rebase_file
+fi

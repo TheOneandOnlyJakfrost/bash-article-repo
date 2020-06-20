@@ -1,0 +1,61 @@
+#!/bin/bash
+
+lst="${HOME}/.irssi/irl.last"
+dir="${HOME}/.irssi/irclogs"
+if [ $# == 1 ] || [ $# == 2 ]; then
+   if [ $# == 2 ]; then
+      if [[ $2 != *[!0-9]* ]]; then
+         line="+$2g"
+      else
+         echo "\"$2\" is not a valid line number"
+         exit
+      fi
+   else
+      line="+G"; fi
+   if [ $# == 1 ] && [[ $1 != *[!0-9]* ]]; then
+      if [ -f "$lst" ]; then
+         file=$(sed "$1q;d" "$lst" \
+            | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g" \
+            | cut -d ':' -f 1)
+         line=$(sed "$1q;d" "$lst" \
+            | sed -r "s/\x1B\[([0-9]{1,2}(;[0-9]{1,2})?)?[m|K]//g" \
+            | cut -d ':' -f 2)
+         if [ -f "$file" ]; then
+            less +"$line"g "$file"
+         fi
+      fi
+   else
+      # try in root dir
+      if [ -f "$dir/$1.log" ]; then
+         less "$line" "$dir/$1.log"
+      else
+        for subdir in $dir/*; do
+          if [ ! -d "$subdir" ]; then
+            continue
+          fi
+          if [ -f "$subdir/$1.log" ]; then
+            less "$line" "$subdir/$1.log"
+          elif [ -f "$subdir/#$1.log" ]; then
+            less "$line" "$subdir/#$1.log"
+          fi
+        done
+      fi
+   fi
+elif [ ! $# == 3 ]; then
+   echo "irssilog room [name] [string]"
+   echo "irssilog room [line]"
+   echo "irssilog resultline"
+   echo "Use '\*' to include all for a parameter"
+   echo "Log dir: $dir"
+else
+   room=$1; name=$2; string=$3
+   grep --with-filename --color=always --line-number     \
+      -E "^([0-9]{4} )?[A-Za-z]{3} [0-9: ]{11} <.*$name.*>.*$string.*"  \
+      $dir/*/*$room*.log                                   \
+      |  tee "$lst"                                      \
+      |  cut --delimiter=':' --fields=2-                 \
+      |  nl --number-width=1                             \
+      |  sed 's/\t/\v/' | sed 's/\t/\v/'                 \
+      |  column --table --separator $'\v'                \
+      |  less -RFX
+fi

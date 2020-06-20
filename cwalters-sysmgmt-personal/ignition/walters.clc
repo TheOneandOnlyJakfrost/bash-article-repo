@@ -1,0 +1,7 @@
+passwd:
+  users:
+    - name: walters
+      groups:
+        - wheel
+      ssh_authorized_keys:
+        - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOQkQHeKan3X+g1jILw4a3KtcfEIED0kByKGWookU7ev walters+2015-general@verbum.org

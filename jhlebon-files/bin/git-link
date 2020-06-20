@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ ! -d .git ]; then
+    echo "Not inside a git repository!"
+    exit 1
+fi
+
+mkdir -p .git/links
+
+# can't directly pipe otherwise we won't affect at_least_one
+at_least_one=0
+while read line; do
+    if [ -n "$line" ]; then
+        ln -vsf $line
+        at_least_one=1
+    fi
+done <<< "$(find .git/links -mindepth 1 -maxdepth 1)"
+
+if [ $at_least_one == 0 ]; then
+    echo "No links!"
+fi

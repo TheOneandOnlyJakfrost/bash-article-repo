@@ -1,0 +1,53 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure(2) do |config|
+    config.vm.provider :libvirt do |domain|
+        domain.memory = 2048
+    end
+
+    config.vm.define "cahc" do |cahc|
+        cahc.vm.box = "centos/7/atomic-host/continuous"
+        cahc.vm.box_url = "https://ci.centos.org/artifacts/sig-atomic/centos-continuous/images/cloud/latest/images/centos-atomic-host-7-vagrant-libvirt.box"
+        cahc.vm.hostname = "cahc-dev"
+        cahc.vm.synced_folder "./", "/vagrant", disabled: 'true'
+        if ENV['PLAYBOOK_FILE']
+            cahc.vm.provision "ansible" do |ansible|
+                ansible.playbook = ENV['PLAYBOOK_FILE']
+                ansible.verbose = "v"
+            end
+        end
+    end
+
+    config.vm.define "alpha", autostart: false do |alpha|
+        alpha.vm.box = "centos/7/atomic-host/alpha"
+        alpha.vm.box_url = "https://ci.centos.org/artifacts/sig-atomic/centos-continuous/images-alpha/cloud/latest/images/centos-atomic-host-7-vagrant-libvirt.box"
+        alpha.vm.hostname = "cahc-alpha-dev"
+        if ENV['PLAYBOOK_FILE']
+            alpha.vm.provision "ansible" do |ansible|
+                ansible.playbook = ENV['PLAYBOOK_FILE']
+                ansible.verbose = "v"
+            end
+        end
+    end
+
+	config.vm.define "centosah", autostart:false  do |centosah|
+        centosah.vm.box = "centos/atomic-host"
+        centosah.vm.hostname = "centosah-dev"
+        if ENV['PLAYBOOK_FILE']
+            centosah.vm.provision "ansible" do |ansible|
+                ansible.playbook = ENV['PLAYBOOK_FILE']
+            end
+        end
+    end
+
+	config.vm.define "centos", autostart:false do |centos|
+        centos.vm.box = "centos/7"
+        centos.vm.hostname = "centos-server-dev"
+        if ENV['PLAYBOOK_FILE']
+            centos.vm.provision "ansible" do |ansible|
+                ansible.playbook = ENV['PLAYBOOK_FILE']
+            end
+        end
+    end
+end

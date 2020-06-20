@@ -1,0 +1,77 @@
+#!/bin/bash
+set -euo pipefail
+
+PET_IMAGE=registry.fedoraproject.org/fedora:27
+
+main() {
+    local name=pet
+    if [ $# -ne 0 ]; then
+        name=$1; shift
+    fi
+
+    if [[ $name == -h ]] || [[ $name == --help ]]; then
+        echo "Enter a pet container, creating it first if it doesn't exist."
+        echo "Usage: $0 [pet-name]"
+        return 0
+    fi
+
+    if ! pet_exists $name; then
+        pet_create $name
+    else
+        pet_resume $name
+    fi
+
+    pet_exec $name
+}
+
+pet_exists() {
+    local name=$1; shift
+    sudo podman inspect $name &>/dev/null
+}
+
+pet_create() {
+    local name=$1; shift
+
+    # pass DISPLAY so we can copy to clipboard in vimx
+    # pass TERM otherwise it defaults to xterm
+    # use --net=host to keep topology simple but point to the libvirtd
+    # dnsmasq so we don't need to worry about on/off VPN resolv.conf
+    # updating
+    echo -n "Creating $name: "
+    sudo podman run --name $name -e DISPLAY -e TERM -t --privileged \
+       -v /srv:/srv -v /var/cache/dnf:/var/cache/dnf -v $HOME:$HOME \
+       -v /etc/localtime:/etc/localtime --detach-keys='ctrl-q,ctrl-p' \
+       --detach --dns=192.168.122.1 --net=host --hostname=$name \
+       $PET_IMAGE /bin/bash
+
+    # do the strict minimum here
+    sudo podman exec $name sh -c "
+        dnf install -y sudo
+        echo '%wheel ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+        useradd --groups wheel --uid 1000 jlebon
+    "
+}
+
+pet_resume() {
+    local name=$1; shift
+    local state=$(get_pet_state $name)
+    if [[ $state == configured ]] || [[ $state == exited ]]; then
+        echo -n "Resuming $name: "
+        sudo podman start $name
+    elif [[ $state != running ]]; then
+        echo "Container '$name' in unknown state: $state"
+        return 1
+    fi
+}
+
+get_pet_state() {
+    local name=$1; shift
+    sudo podman inspect $name --format '{{.State.Status}}'
+}
+
+pet_exec() {
+    local name=$1; shift
+    sudo podman exec -t -e TERM=$TERM -e DISPLAY=$DISPLAY $name sudo -i -u jlebon
+}
+
+main "$@"

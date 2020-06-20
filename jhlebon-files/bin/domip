@@ -1,0 +1,102 @@
+#!/bin/bash
+
+# XXX: we should be able to use domifaddr, though that only works if the domain
+# was created with --network network=<mynetwork>, not with e.g. bridge=, so we
+# should probably still keep the bridge fallback.
+
+# XXX: need to switch over to using libvirt-python
+
+get_running_domains ()
+{
+	virsh list --name | sort
+}
+
+# $1 - domain name
+get_domain_id ()
+{
+	virsh list | tail -n +3 | awk "\$2 ~ /^$1\$/ { print \$1 }"
+}
+
+
+# $1 - domain name
+get_domain_mac ()
+{
+	virsh domiflist $1 | tail -n +3 | awk '{ print $5 }'
+}
+
+# $1 - domain name
+get_domain_bridge ()
+{
+	# two cases:
+	# 1. only the network used is specified (e.g. "default" or
+	#    "vagrant-libvirt"). in that case, we then have to look at the net-info
+	#    for that network to see what the bridge name is.
+	# 2. a specific bridge is mentioned (e.g. "virbr0"). then there's nothing
+	#    else to do.
+
+	iftype=$(virsh domiflist $1 | tail -n +3 | awk '{ print $2 }')
+	if [[ $iftype == bridge ]]; then
+		brg=$(virsh domiflist $1 | tail -n +3 | awk '{ print $3 }')
+	elif [[ $iftype == network ]]; then
+		network=$(virsh domiflist $1 | tail -n +3 | awk '{ print $3 }')
+		brg=$(virsh net-info $network | awk '/^Bridge/ { print $2 }')
+	fi
+
+	echo $brg
+}
+
+# $1 - mac
+# $2 - bridge (e.g. virbr0)
+# $3 - field
+get_field_from_mac_and_brg ()
+{
+	mac=$1; shift
+	brg=$1; shift
+	field=$1; shift
+
+	python << EOF
+import json
+with open("/var/lib/libvirt/dnsmasq/$brg.status") as f:
+	data = json.load(f)
+field = ""
+expiry = -1
+for node in data:
+	if node['mac-address'] == "$mac":
+		if "$field" in node:
+			if node['expiry-time'] > expiry:
+				expiry = node['expiry-time']
+				field = node["$field"]
+if expiry > 0:
+	print(field)
+EOF
+}
+
+main_output ()
+{
+	echo "Id Domain Hostname MAC IP"
+	for domain in $(get_running_domains); do
+		unset id mac brg ip hostname
+		id=$(get_domain_id $domain)
+		mac=$(get_domain_mac $domain)
+		if [ -n "$mac" ]; then
+			brg=$(get_domain_bridge $domain)
+			ip=$(get_field_from_mac_and_brg $mac $brg ip-address)
+			hostname=$(get_field_from_mac_and_brg $mac $brg hostname)
+			if [[ $hostname == $domain ]]; then
+				hostname="<same>"
+			fi
+		fi
+		echo "$id $domain ${hostname:-<N/A>} ${mac:-<N/A>} ${ip:-<N/A>}"
+		#if [ -n "$ip" ]; then
+		#	echo "$ip" > /tmp/$domain.ip
+		#	chmod a+r /tmp/$domain.ip
+                #fi
+	done
+}
+
+out=$(main_output | column --table)
+max=$(wc -L <<< "$out")
+head -n 1 <<< "$out"
+printf -- '-%.0s' $(seq 1 $max); echo
+tail -n +2 <<< "$out"
+#echo "IPs cached to /tmp/"

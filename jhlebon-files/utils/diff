@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+if [[ $0 != "utils/diff" ]] &&
+   [[ $0 != "utils/rdiff" ]]; then
+	echo "ERROR: Must be run from repo root." >&2
+	exit 1
+fi
+
+if [ $# -eq 0 ]; then
+	echo "Compare repo file against installed file."
+	echo "Usage: $0 <file>..."
+	echo "Example: $0 dotfiles/.bashrc"
+	exit
+fi
+
+while [ $# -gt 0 ]; do
+
+	file=$1; shift
+
+	if [[ $file == /* ]]; then
+		echo "ERROR: Must use relative file paths." >&2
+		exit 1
+	fi
+
+	if [ -d "$file" ]; then
+		continue
+	fi
+
+	# get first parent dir
+	dir=${file%%/*}
+	base=${file#*/}
+
+	target=
+	if [[ $dir == dotfiles ]]; then
+		target="$HOME/$base"
+	elif [[ $dir == "bin" ]]; then
+		target="$HOME/.local/bin/$base"
+	elif [[ $dir == "complete" ]]; then
+		target="$HOME/.bash_completion.d/$base"
+	fi
+
+	if [ ! -e "$target" ]; then
+		echo "Local file \"$target\" does not exist, skipping."
+		continue
+	fi
+
+	if [[ $0 == "utils/diff" ]]; then
+		git diff --color --no-index "$target" "$file" || :
+	else # rdiff
+		git diff --color --no-index "$file" "$target" || :
+	fi
+
+done | less -FRX

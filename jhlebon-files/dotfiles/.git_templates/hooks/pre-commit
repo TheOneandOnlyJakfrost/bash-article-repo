@@ -1,0 +1,25 @@
+#!/bin/bash
+set -euo pipefail
+
+# This hook ensures that we don't accidentally lose partially staged changes
+# when committing. The typical case this prevents is e.g. when one painstakingly
+# adds select hunks with `git add -p`, and then by habit uses the `-a/--all`
+# flag at `git commit` time. At that point, the carefully crafted index is gone
+# and the developer proceeds to sob uncontrollably.
+
+# abort if it looks like we're committing *everything*, but yet the current
+# index has a mix of staged and unstaged changes
+if git diff --quiet && \
+   ! env --unset GIT_INDEX_FILE git diff --quiet && \
+   ! env --unset GIT_INDEX_FILE git diff --staged --quiet; then
+    echo "Aborting; trying to commit everything, but the index is not empty."
+    echo "Use 'git commit -n' to disable this safety check."
+    exit 1
+fi
+
+# If git creates a separate index for the commit (i.e. the index is not
+# committed "as is", but needs to be modified first due to e.g.
+# -a/--interactive/[files...] etc...), it will set GIT_INDEX_FILE to the new
+# index file to make sure git commands in this hook see the actual stage
+# changes. Unsetting it means we use the actual index that was in place prior to
+# committing.

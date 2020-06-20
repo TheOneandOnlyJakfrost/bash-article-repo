@@ -1,0 +1,84 @@
+[color]
+	ui = true
+	# We use always here instead of auto because otherwise
+	# we don't get any coloring with Ggrep in vim.
+	grep = always
+[color "grep"]
+	linenumber = green
+	match = red bold
+	filename = magenta
+[merge]
+	conflictstyle=diff3
+	tool = meld
+[user]
+	name = Jonathan Lebon
+	email = jlebon@redhat.com
+	signingkey = 519CE313
+[alias]
+	cam = commit -am
+	scrap = reset --hard HEAD
+	nuke = reset --hard HEAD^
+	origin = reset --hard origin/master
+	last = log -1 HEAD
+	ck = checkout
+	amend = commit --amend
+	amendit = commit --amend --no-edit
+	fix = commit --amend --no-edit -a
+	cm = checkout master
+	rlog = ! sh -c 'git log --reverse --ancestry-path $1^..HEAD' - 2>/dev/null
+	rei = rebase -i
+	rec = "!f() { git update && git rebase --continue; }; f"
+	rea = rebase --abort
+	cpc = cherry-pick --continue
+	cpa = cherry-pick --abort
+	l = log --pretty=oneline
+	la = log --pretty=format:'%C(yellow)%h %Cred%ad %Cblue%an%Cgreen%d %Creset%s' --date=short
+	lg = log --graph --pretty=format:'%C(yellow)%h %Cred%ad %Cblue%an%Cgreen%d %Creset%s' --date=short
+	h = log --graph --pretty=format:'%C(yellow)%h %Cred%ad %Cblue%an%Cgreen%d %Creset%s' --date=short -n 10
+	hh = log --graph --pretty=format:'%C(yellow)%h %Cred%ad %Cblue%an%Cgreen%d %Creset%s' --date=short -n 20
+	update = add -u
+
+	# same as git stash show, except you can just give the stash index number
+	# defaults to git stash list if no index number given
+	# also shows untracked stashed files (if any), which are kept in the third parent of the commit
+	stashow = "!f() { set -e; if [ $# -eq 0 ]; then git stash list; else ( git show --color=always stash@{$1}; if git rev-parse --verify --quiet stash@{$1}^3; then git show --color=always stash@{$1}^3; fi; ) | LESS=FRX less -r; fi; }; f"
+
+	pr = "!f() { set -e; pr=$1; shift; git push origin HEAD:refs/heads/pr/$pr \"$@\"; }; f"
+	prb = "!f() { set -e; pr=$(git rev-parse --abbrev-ref HEAD); git pr $pr \"$@\"; }; f"
+	prd = "!f() { set -e; while [ $# -ne 0 ]; do b=$1; shift; git push origin :pr/$b; git branch -D $b; done;}; f"
+
+	restamp = "! git commit --amend --no-edit --date=\"$(date -R)\""
+
+	odiff = diff origin/master
+	udiff = diff upstream/master
+	get-pr = "!f() { set -e; pr=$1; shift; git fetch upstream pull/$pr/merge \"$@\" || git fetch upstream pull/$pr/head; git checkout FETCH_HEAD; }; f"
+	#gh-pr-branch-get = "!f() { set -e; author=$1; shift; branch=$1; shift; git fetch https://github.com/$author/ }; f"
+	subu = submodule update
+[pull]
+	rebase = preserve
+[push]
+	default = simple
+[diff]
+	algorithm = patience
+	renames = copies
+	indentHeuristic = true
+	compactionHeuristic = true
+[include]
+	path = .gitconfig.local
+[commit]
+	verbose = true
+[pager]
+	log = diff-highlight | less
+	show = diff-highlight | less
+	diff = diff-highlight | less
+[color "diff-highlight"]
+	oldNormal    = "black #f8cbcb"
+	oldHighlight = "black #ff8888"
+	newNormal    = "black #cbeecb"
+	newHighlight = "black #aaffaa"
+[rebase]
+	autostash = true
+[grep]
+	lineNumber = true
+[init]
+	templateDir = ~/.git_templates

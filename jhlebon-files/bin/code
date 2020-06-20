@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Find the codebase given
+# The filter is used when there are multiple possible matches
+if [ $# -ne 1 ] && [ $# -ne 2 ] && [ $# -ne 3 ]; then
+	echo "Usage: $0 <codebase> [[filter] lineno]"
+	exit 1
+fi
+
+CODE_PATH=
+for path in /code "$HOME/Code" "$HOME/code"; do
+    if [ -d "$path" ]; then
+        CODE_PATH=$path
+        break
+    fi
+done
+
+if [ -z "$CODE_PATH" ]; then
+    echo "ERROR: can't find valid code path"
+    exit 1
+fi
+
+CACHE_TXT="$HOME/.cache/.code.cache.txt"
+CACHE_MD5="$HOME/.cache/.code.cache.md5sum"
+LAST_BASE="$HOME/.cache/.code.last"
+mkdir -p "$HOME/.cache"
+
+codebase=$1; shift
+filter=
+if [ $# -ne 0 ]; then
+	filter=$1; shift
+fi
+
+# 1 arg --> filter or lineno
+# 2 args --> filter, and then lineno
+
+lineno=
+if [ $# -ne 0 ]; then
+	lineno=$1; shift
+else
+	# was filter actually a lineno?
+	if [[ $filter != *[!0-9]* ]]; then
+		lineno=$filter
+		filter=
+	fi
+fi
+
+function create_cache() {
+	# This magical find command will find a directory maching the
+	# codebase's name, which also has a .git subdirectory. It then
+	# prints the path of the directory.
+	find -L $CODE_PATH/ \
+		-maxdepth 5 \
+		-type d \
+		-path "*/.git" \
+		-prune | xargs dirname | sort > "$CACHE_TXT"
+}
+
+# check if we have a cached listing
+if [ -f "$CACHE_TXT" ] && [ -f "$CACHE_MD5" ]; then
+
+	# check that the listing is still valid
+	cursum=$(cat "$CACHE_MD5")
+	newsum=$(tree -d -L 4 /$CODE_PATH | md5sum | cut -f 1 -d ' ')
+	if [ "$cursum" != "$newsum" ]; then
+		create_cache
+		echo "$newsum" > "$CACHE_MD5"
+	fi
+else
+	create_cache
+	echo "$newsum" > "$CACHE_MD5"
+fi
+
+codebases=$(cat "$CACHE_TXT")
+
+# is this the bash completion script requesting a list of choices?
+if [ "$codebase" == "<bash_completion>" ]; then
+	echo "$codebases" | xargs -n 1 basename | sort | uniq
+	exit 0
+fi
+
+# remember last before potentially overwriting it
+last=
+if [ -e "$LAST_BASE" ]; then
+	last=$(cat "$LAST_BASE")
+fi
+
+# if we're currently in a codebase, remember it so that '-' works
+git rev-parse &> /dev/null
+if [ $? -eq 0 ]; then
+	echo "$(pwd)" > "$LAST_BASE"
+fi
+
+# is it just the user asking to go back?
+if [ "$codebase" == "-" ]; then
+	if [ -n "$last" ];  then
+		echo "$last"
+		exit 0
+	else
+		echo "ERROR: no last codebase registered"
+		exit 1
+	fi
+fi
+
+# no filtering
+if [ -z "$filter" ]; then
+	matches=$(echo "$codebases" | grep "/$codebase\$")
+
+# filtering by string
+else
+	matches=$(echo "$codebases" | grep "$filter.*/$codebase\$")
+fi
+
+# filtering by lineno
+if [ ! -z "$lineno" ] && [[ $lineno != *[!0-9]* ]]; then
+	matches=$(echo "$matches" | tail -n +$lineno | head -n 1)
+fi
+
+num=$(echo "$matches" | wc -l)
+
+if [ "$num" -eq 0 ] || [ "$matches" == "" ]; then
+	echo "ERROR: could not find codebase $codebase"
+	exit 1
+fi
+
+if [ "$num" -gt 1 ]; then
+
+	# check if they're all actually the same inode
+	inode=
+	same=true
+	for codebase in $matches; do
+		if [ -z "$inode" ]; then
+			inode=$(stat -c %i "$codebase")
+		else
+			if  [[ $inode != $(stat -c %i "$codebase") ]]; then
+				same=false
+				break
+			fi
+		fi
+	done
+
+	if [[ $same == false ]]; then
+		echo "ERROR: multiple matches:"
+		echo "$matches" | nl
+		exit 1
+	fi
+
+	# pick the shortest one
+	best=
+	for codebase in $matches; do
+		if [ -z "$best" ] || \
+		   [ ${#codebase} -lt ${#best} ]; then
+				best=$codebase
+		fi
+	done
+
+	echo "$best"
+	exit 0
+fi
+
+echo "$matches"

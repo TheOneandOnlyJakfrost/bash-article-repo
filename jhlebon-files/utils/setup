@@ -1,0 +1,48 @@
+# no hash bang
+
+# Quick way of extracting the files in new/temporary
+# environments.
+
+# This file is meant to be sourced.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+	echo "This file must be sourced, not executed."
+	exit 0
+fi
+
+# OK, we're being sourced -- do not use exit.
+
+if [[ "$(realpath $PWD)" != \
+      "$(realpath $(dirname ${BASH_SOURCE[0]})/..)" ]]; then
+	echo "Must be sourced from repo root."
+	return
+fi
+
+__SUDO=env # no op
+if [ $UID -ne 0 ]; then
+    # assume sudo is installed
+    __SUDO=sudo
+fi
+
+# can't use xargs
+pkgs=$(for pkg in vim-enhanced git sudo findutils tree; do
+        if ! rpm -q $pkg &>/dev/null; then
+            echo $pkg
+        fi
+       done)
+if [ -n "${pkgs}" ]; then
+    $__SUDO yum install -y ${pkgs}
+fi
+[ $? -eq 0 ] || return
+unset __SUDO
+
+utils/git-setup
+[ $? -eq 0 ] || return
+
+utils/install-all
+[ $? -eq 0 ] || return
+
+source $HOME/.bashrc
+[ $? -eq 0 ] || return
+
+bind -f $HOME/.inputrc
+[ $? -eq 0 ] || return

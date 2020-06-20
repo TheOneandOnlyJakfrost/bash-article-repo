@@ -1,0 +1,10 @@
+{"ignition":{"config":{},"security":{"tls":{}},"timeouts":{},"version":"2.2.0"},"networkd":{},"passwd":{"users":[{"groups":["sudo"],"name":"walters","sshAuthorizedKeys":["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOQkQHeKan3X+g1jILw4a3KtcfEIED0kByKGWookU7ev walters+2015-general@verbum.org"]}]},"storage":{},"systemd":{
+    "units": [
+      {
+        "contents": "[Unit]\nType=oneshot\n\n[Service]\nExecStart=/usr/bin/echo \"Hello, World!\"\n\n[Install]\nWantedBy=multi-user.target",
+        "enabled": true,
+        "name": "cgwalters-hello.service"
+      }
+    ]
+  }
+}

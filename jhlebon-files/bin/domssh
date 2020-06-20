@@ -1,0 +1,186 @@
+#!/bin/bash
+
+if [ $# -lt 1 ]; then
+	echo "Usage: $0 <domain> [command [args]...]]"
+	exit
+fi
+
+dom=$1; shift
+
+user=cloud-user
+pass=atomic
+
+get_running_domains ()
+{
+	virsh list --name
+}
+
+# $1 - domain name
+domain_running ()
+{
+	local domain
+	for domain in $(get_running_domains); do
+		if [[ $domain == $1 ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# $1 - domain name
+get_domain_mac ()
+{
+	virsh domiflist $1 | tail -n +3 | awk '/^vnet/ { print $5 }'
+}
+
+# $1 - domain name
+get_domain_bridge ()
+{
+	# two cases:
+	# 1. only the network used is specified (e.g. "default" or
+	#    "vagrant-libvirt"). in that case, we then have to look at the net-info
+	#    for that network to see what the bridge name is.
+	# 2. a specific bridge is mentioned (e.g. "virbr0"). then there's nothing
+	#    else to do.
+
+	iftype=$(virsh domiflist $1 | tail -n +3 | awk '{ print $2 }')
+	if [[ $iftype == bridge ]]; then
+		brg=$(virsh domiflist $1 | tail -n +3 | awk '{ print $3 }')
+	elif [[ $iftype == network ]]; then
+		network=$(virsh domiflist $1 | tail -n +3 | awk '{ print $3 }')
+		brg=$(virsh net-info $network | awk '/^Bridge/ { print $2 }')
+	fi
+
+	echo $brg
+}
+
+# $1 - mac
+# $2 - bridge (e.g. virbr0)
+# $3 - field
+get_field_from_mac_and_brg ()
+{
+	mac=$1; shift
+	brg=$1; shift
+	field=$1; shift
+
+	python << EOF
+import json
+with open("/var/lib/libvirt/dnsmasq/$brg.status") as f:
+	data = json.load(f)
+field = ""
+expiry = -1
+for node in data:
+	if node['mac-address'] == "$mac":
+		if "$field" in node:
+			if node['expiry-time'] > expiry:
+				expiry = node['expiry-time']
+				field = node["$field"]
+if expiry > 0:
+	print(field)
+EOF
+}
+
+# $1 - domain name
+get_domain_ip ()
+{
+	local domain=$1
+
+	# create cache if not there
+	#if [ ! -f /tmp/$domain.ip ]; then
+		domain_running $domain
+		if [ $? != 0 ]; then
+			echo "Domain $domain is not running" >&2
+			exit 1
+		fi
+
+		mac=$(get_domain_mac $domain)
+		if [ $? != 0 ]; then
+			echo "Could not retrieve MAC of domain $domain" >&2
+			exit 1
+		fi
+
+		brg=$(get_domain_bridge $domain)
+		if [ $? != 0 ]; then
+			echo "Could not retrieve bridge of domain $domain" >&2
+			exit 1
+		fi
+
+		ip=$(get_field_from_mac_and_brg $mac $brg ip-address)
+		if [ $? != 0 ]; then
+			echo "Could not retrieve IP of domain $domain" >&2
+			exit 1
+		fi
+
+		#echo "$ip" > /tmp/$domain.ip
+	#fi
+
+	#cat /tmp/$domain.ip
+	echo "$ip"
+}
+
+ip=$(get_domain_ip $dom)
+if [ $? != 0 ]; then
+	exit 1
+fi
+
+# check if IP is valid
+waited_for_ip=0
+if [[ -z $ip ]] || ! ping -c 1 -W 1 $ip &>/dev/null; then
+
+	echo -n "Waiting for valid IP..."
+	waited_for_ip=1
+
+	# Wait until a valid IP address is produced
+	i=0
+	timeout=25
+	while [ $i -lt $timeout ]; do
+
+		ip=$(get_domain_ip $dom)
+		if [ $? != 0 ]; then
+			exit 1
+		fi
+
+		if [[ ! -z $ip ]] && ping -c 1 -W 1 $ip &>/dev/null; then
+			echo " done!"
+			break
+		fi
+
+		i=$((i + 1))
+		echo -n "."
+
+		if [[ -z $ip ]]; then
+			sleep 1
+		fi
+	done
+
+	if [ $i -eq $timeout ]; then
+		echo
+		echo "Domain IP has been invalid for more than ${timeout}s" >&2
+		exit 1
+	fi
+fi
+
+# Wait until the ssh port is up in case this is a freshly booted domain
+sshwait $ip
+
+SSH="sshpass -p "$pass" \
+		ssh -o UserKnownHostsFile=/dev/null \
+		    -o StrictHostKeyChecking=no \
+		    $user@$ip"
+
+# If we had to wait for an IP, then it's probably being provisioned for the
+# first time. Which means we should probably wait a bit to give cloud-init some
+# time to set up user creds.
+if [ $waited_for_ip == 1 ]; then
+	i=0
+	timeout=5
+	while [ $i -lt $timeout ]; do
+		if $SSH true &> /dev/null; then
+			break
+		fi
+		i=$((i + 1))
+		sleep 1
+	done
+fi
+
+$SSH "$@"

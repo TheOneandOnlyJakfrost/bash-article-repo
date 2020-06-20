@@ -1,0 +1,12 @@
+#!/bin/bash
+
+if [ $# -lt 2 ]; then
+	echo "Usage: $0 <src-remote> <dest-remote> [args]"
+	echo "Make all refs on <dest-remote> equal the matching refs from <src-remote>"
+	exit 1
+fi
+
+src_remote=$1; shift
+dest_remote=$1; shift
+
+git push $dest_remote refs/remotes/$src_remote/*:refs/heads/* "$@"

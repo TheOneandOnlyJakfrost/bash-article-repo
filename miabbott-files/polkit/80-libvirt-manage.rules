@@ -1,0 +1,6 @@
+// https://goldmann.pl/blog/2012/12/03/configuring-polkit-in-fedora-18-to-access-virt-manager/
+polkit.addRule(function(action, subject) {
+  if (action.id == "org.libvirt.unix.manage" && subject.local && subject.active && subject.isInGroup("wheel")) {
+      return polkit.Result.YES;
+  }
+});

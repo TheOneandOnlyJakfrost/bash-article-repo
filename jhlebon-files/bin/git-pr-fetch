@@ -1,0 +1,85 @@
+#!/bin/bash
+set -euo pipefail
+
+main() {
+
+    local op=
+    if [[ $0 == */git-pr-fetch ]]; then
+        op=pr-fetch
+    elif [[ $0 == */git-pr-push ]]; then
+        op=pr-push
+    else
+        echo "ERROR: Must be called as git-pr-fetch or git-pr-push." >&2
+        exit 1
+    fi
+
+    if [ $# -lt 1 ]; then
+        echo "Usage: git $op <PULL-ID> [ARGS...]" >&2
+        exit 1
+    fi
+
+    local pull_id=$1; shift
+
+    # go to top level; also used to error out early if we're not in a git repo
+    cd $(git rev-parse --show-toplevel)
+
+    local repo=$(get_github_repo)
+    if [ $op == pr-fetch ]; then
+        local args=$(get_fetch_args $repo $pull_id)
+        git fetch $args
+        git checkout FETCH_HEAD
+    else
+        local args=$(get_push_args $repo $pull_id)
+        git push $args "$@"
+    fi
+}
+
+get_github_repo() {
+    local remote=$(find_remote)
+    local url=$(git ls-remote --get-url $remote)
+
+    if [[ $url == git@github.com:* ]]; then
+        local repo=${url#*:}
+    elif [[ $url == https://github.com/* ]] || \
+         [[ $url == http://github.com/* ]]; then
+        local repo=${url#*.com/}
+    else
+        echo "ERROR: Unknown GitHub URL $url" >&2
+        exit 1
+    fi
+
+    repo=${repo%.git}
+    echo $repo
+}
+
+find_remote() {
+    # prefer 'upstream' over 'origin'
+    remotes=$(git remote)
+    for remote in upstream origin; do
+        if grep -q $remote <<< "$remotes"; then
+            echo $remote
+            return
+        fi
+    done
+    return 1
+}
+
+get_fetch_args() {
+    local repo=$1; shift
+    local pull_id=$1; shift
+    local json=$(curl -sSL https://api.github.com/repos/$repo/pulls/$pull_id)
+    local pr_author_repo=$(jq -r .head.repo.full_name <<< "$json")
+    local pr_author_ref=$(jq -r .head.ref <<< "$json")
+    echo "git@github.com:$pr_author_repo $pr_author_ref"
+}
+
+get_push_args() {
+    local repo=$1; shift
+    local pull_id=$1; shift
+    local json=$(curl -sSL https://api.github.com/repos/$repo/pulls/$pull_id)
+    local pr_author_repo=$(jq -r .head.repo.full_name <<< "$json")
+    local pr_author_ref=$(jq -r .head.ref <<< "$json")
+    echo "git@github.com:$pr_author_repo HEAD:$pr_author_ref"
+}
+
+main "$@"

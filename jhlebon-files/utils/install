@@ -1,0 +1,113 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+if [[ $0 != "utils/install" ]]; then
+	echo "ERROR: Must be run from repo root." >&2
+	exit 1
+fi
+
+if [ $# -eq 0 ]; then
+	echo "Save installed file in stash and replace with repo file."
+	echo "Usage: $0 <file>..."
+	echo "Example: $0 dotfiles/.bashrc"
+	exit
+fi
+
+# Workaround for git-diff-index bug which would incorrectly give an error code
+# for no reason. Calling git-status beforehand seems to fix it.
+git status &> /dev/null
+
+if [ -z "$(git config user.email)" ] || \
+   [ -z "$(git config user.name)" ]; then
+	echo "ERROR: A git user must be set up to stash current files." >&2
+	if [ -t 1 ]; then
+		read -n 1 -p "Call utils/git-setup (y/n)? " answer
+		echo
+		if [[ $answer == y ]]; then
+			utils/git-setup
+		else
+			exit 1
+		fi
+	else
+		echo "Consider utils/git-setup." >&2
+		exit 1
+	fi
+fi
+
+if ! git diff-index --quiet HEAD; then
+	echo "ERROR: Dirty workspace." >&2
+	exit 1
+fi
+
+while [ $# -gt 0 ]; do
+
+	file=$1; shift
+
+	if [[ $file == /* ]]; then
+		echo "ERROR: Must use relative file paths." >&2
+		exit 1
+	fi
+
+	if [ -d "$file" ]; then
+		continue
+	fi
+
+	# get first parent dir
+	dir=${file%%/*}
+	base=${file#*/}
+
+	target=
+	if [[ $dir == dotfiles ]]; then
+		target="$HOME/$base"
+	elif [[ $dir == "bin" ]]; then
+		target="$HOME/.local/bin/$base"
+	elif [[ $dir == "complete" ]]; then
+		target="$HOME/.bash_completion.d/$base"
+	fi
+
+	# touch an empty file so that we stash it
+	# XXX: no longer do it this way
+	if [ ! -e "$target" ]; then
+		echo "INFO: Creating empty file \"$target\"."
+		mkdir -p $(dirname ${target})
+		touch "$target"
+	fi
+
+	cp -d --remove-destination "$target" "$file"
+
+done
+
+# Workaround for git-diff-index bug which would incorrectly give an error code
+# for no reason. Calling git-status beforehand seems to fix it.
+git status &> /dev/null
+
+if git diff-index --quiet HEAD; then
+	echo "INFO: Files already at latest version."
+	exit 0
+fi
+
+echo "INFO: Saving files in stash@{0}"
+git stash save "$(date): utils/install backup" > /dev/null
+stashed=$(git stash show stash@{0} --name-only)
+
+echo "INFO: Installing files:"
+for file in $stashed; do
+
+	# get first parent dir
+	dir=${file%%/*}
+	base=${file#*/}
+
+	target=
+	if [[ $dir == dotfiles ]]; then
+		target="$HOME/$base"
+	elif [[ $dir == "bin" ]]; then
+		target="$HOME/.local/bin/$base"
+	elif [[ $dir == "complete" ]]; then
+		target="$HOME/.bash_completion.d/$base"
+	fi
+
+	cp -d --remove-destination "$file" "$target"
+
+	echo -e "\t$target"
+done

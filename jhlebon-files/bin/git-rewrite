@@ -1,0 +1,27 @@
+#!/bin/bash
+set -euo pipefail
+
+main() {
+    local rev=$(find_merge_base)
+    if [ "$rev" != "" ]; then
+        git rebase -i $rev
+    else # handle rebasing against branch root
+        branch=$(git rev-parse --abbrev-ref HEAD)
+        git rebase -i --root $branch
+    fi
+}
+
+find_merge_base() {
+    # if HEAD is already part of multiple branches, then look for the first
+    # parent commit that is in an additional branch
+    base_num=$(git branch --all --contains HEAD | wc -l)
+    for rev in $(git rev-list HEAD); do
+        local num=$(git branch --all --contains ${rev} | wc -l)
+        if [ ${num} -gt ${base_num} ]; then
+            echo $rev
+            break
+        fi
+    done
+}
+
+main "$@"

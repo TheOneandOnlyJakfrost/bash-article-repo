@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ -z "$(git config user.email)" ]; then
+	git config user.email jlebon@redhat.com
+fi
+
+if [ -z "$(git config user.name)" ]; then
+	git config user.name "Jonathan Lebon"
+fi
+
+# create dir, but let it get installed by utils/install
+mkdir -p $HOME/.git_templates

@@ -1,0 +1,32 @@
+[user]
+    name = Micah Abbott
+    email = miabbott@redhat.com
+[push]
+    default = simple
+[core]
+    editor = vim
+[log]
+    abbrevCommit = true
+[alias]
+    co = checkout
+    ci = commit
+    st = status
+    br = branch --sort=committerdate
+    lg = "log --color --stat --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit"
+    hist = log --pretty=format:\"%h %ad | %s%d [%an]\" --graph --date=short
+    alias = config --get-regexp ^alias\\.
+    pr = "!f() { git fetch $1 refs/pull/$2/head:pr/$1/$2 && git checkout pr/$1/$2; } ; f"
+    upr = "!f() { git pull $1 pull/$2/head; } ; f"
+    mr = "!f() { git fetch $1 merge-requests/$2/head:mr-$1-$2 && git checkout mr-$1-$2; } ; f"
+    umr = "!f() { git pull $1 merge-requests/$2/head; } ; f"
+    dt = difftool
+[sendemail]
+    from = Micah Abbott <miabbott@redhat.com>
+    smtpserver = smtp.corp.redhat.com
+[diff]
+    tool = vimdiff
+[difftool]
+    prompt = false
+[grep]
+	lineNumber = true
+	extendRegexp = true

@@ -1,0 +1,15 @@
+#!/bin/bash
+set -euo pipefail
+
+while [ $# -ne 0 ]; do
+	spec=$1; shift
+	rpmbuild -ba \
+		--define "_sourcedir $PWD" \
+		--define "_specdir $PWD" \
+		--define "_builddir $PWD/.build" \
+		--define "_srcrpmdir $PWD/rpms" \
+		--define "_rpmdir $PWD/rpms" \
+		--define "_buildrootdir $PWD/.buildroot" "$spec"
+	rm -rf "$PWD/.build"
+done
+

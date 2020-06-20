@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import os.path
+
+CSCOPE_DIR = "~/.cscope/"
+
+# XXX: need to source this from a local conf file instead
+# Define paths to relevant codebases and files
+codebases = {}
+# use src to avoid glnx submodule
+codebases["ostree"] = "/code/gh/ostreedev/ostree/src"
+# use src to avoid glnx submodule
+codebases["rpm-ostree"] = "/code/gh/pa/rpm-ostree/src"
+codebases["openssl"] = "/code/gh/openssl/openssl"
+codebases["libglnx"] = "/code/gnome/libglnx"
+codebases["libsoup"] = "/code/gnome/libsoup"
+codebases["headers"] = "/usr/include"
+codebases["plymouth"] = "/code/git.freedesktop.org/plymouth"
+codebases["plymouth_rhel"] = "/code/pdr/plymouth/plymouth-0.8.9"
+codebases["gdt"] = "/code/git.gnome.org/gnome-desktop-testing"
+codebases["libdnf"] = "/code/gh/rsm/libdnf"
+codebases["glib"] = "/code/git.gnome.org/glib"
+codebases["json-glib"] = "/code/git.gnome.org/json-glib"
+codebases["rpm"] = "/code/gh/rsm/rpm"
+codebases["libgsystem"] = "/code/git.gnome.org/libgsystem"
+codebases["systemd"] = "/code/gh/systemd/systemd"
+codebases["libsolv"] = "/code/gh/openSUSE/libsolv"
+codebases["librepo"] = "/code/gh/rsm/librepo/librepo"
+codebases["selinux"] = "/code/gh/SELinuxProject/selinux"
+codebases["libarchive"] = "/code/gh/libarchive/libarchive"
+codebases["linux"] = "/usr/src/debug/kernel-4.7.fc23/linux-4.7.5-100.fc23.x86_64/"
+codebases["linux_git"] = "/code/git.kernel.org/linux/kernel/git/torvalds/linux"
+codebases["libgcrypt"] = "/code/pfp/libgcrypt/libgcrypt-1.6.6"
+codebases["openshift"] = "/code/go/src/github.com/openshift/origin"
+codebases["stap"] = "/home/jlebon/code/systemtap/systemtap"
+codebases["glibc"] = "/code/sourceware.org/glibc"
+codebases["bubblewrap"] = "/code/gh/pa/bubblewrap"
+codebases["elfutils_git"] = "/home/jlebon/code/elfutils/elfutils"
+codebases["elfutils"] = "/usr/src/debug/elfutils-0.161"
+codebases["libvirt_git"] = "/home/yyz/jlebon/codebase/libvirt/libvirt"
+codebases["libvirt"] = "/usr/src/debug/libvirt-1.1.3.9"
+codebases["qemu"] = "/usr/src/debug/qemu-1.6.2"
+codebases["gdb"] = "/home/yyz/jlebon/codebase/binutils-gdb"
+codebases["git"] = "/code/gh/git/git"
+codebases["curl"] = "/code/gh/curl/curl"
+
+target_codebases = set()
+
+def main():
+   os.chdir(os.path.expanduser(CSCOPE_DIR))
+   parse_args()
+   build_cscope_files()
+
+def parse_args():
+   if len(sys.argv) < 2:
+      print_usage()
+      print_current()
+      print_help()
+   else:
+      collect_codebases()
+
+def print_usage():
+   print("Runs cscope on the given codebases and updates the database.")
+
+def print_current():
+   if os.path.isfile("current"):
+      os.system("echo Current codebases: `cat current`")
+
+def print_help():
+   print("Available codebases:",)
+   for name in sorted(codebases):
+      print(name,)
+
+def collect_codebases():
+   for name in sys.argv[1:]:
+      assert_valid_codebase(name)
+      target_codebases.add(name)
+
+def assert_valid_codebase(name):
+   if name not in codebases:
+      print("Invalid codebase '%s'." % name)
+      print_help()
+      exit(1)
+   if not os.path.isdir(codebases[name]):
+      print("Codebase %s has invalid path '%s'." % (name, codebases[name]))
+      print("Please fix and try again.")
+      exit(1)
+
+# XXX: make this whole function cleaner
+def build_cscope_files():
+
+   if not len(target_codebases):
+      return
+
+   print("Building cscope database with paths:")
+   paths = []
+   for target_codebase in target_codebases:
+      print(codebases[target_codebase])
+      paths.append(codebases[target_codebase])
+
+   # XXX: make cleaner
+   os.system("find %s -type f -a \( -name '*.c' -o -name '*.cpp' -o -name '*.h' -o -name '*.cxx' \) \
+               > cscope.files" % ' '.join(paths))
+   os.system("cscope -b -q")
+
+   # Only used to know on which codebase we are
+   os.system("echo '%s' > current" % ' '.join(target_codebases))
+
+if __name__ == "__main__":
+   main()
+

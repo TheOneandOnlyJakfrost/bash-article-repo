@@ -1,0 +1,61 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ $# -lt 2 ]; then
+	echo "Usage: $0 <name> <souce-img> [cidata.iso] [RAM=1536] [NCPU=1]"
+	echo "Usage: Set [cidata.iso] to \"none\" for no image"
+	exit
+fi
+
+dom=$1; shift
+srcimg=$1; shift
+
+# defaults
+cidata=
+ram=1536
+ncpu=1
+
+if [ $# -gt 0 ]; then
+	cidata=$1; shift
+fi
+
+if [ $# -gt 0 ]; then
+	ram=$1; shift
+fi
+
+if [ $# -gt 0 ]; then
+	ncpu=$1; shift
+fi
+
+CPU=CPU
+if [ $ncpu -gt 1 ]; then
+	CPU+=s
+fi
+
+echo -n "Creating domain $dom (${ram}M RAM and $ncpu $CPU)... "
+
+# create the new image
+newimg="/var/lib/libvirt/images/$dom.qcow2"
+
+SUDO=
+if [ $UID != 0 ]; then
+    SUDO=sudo
+fi
+
+$SUDO qemu-img create -q -f qcow2 -o backing_file="$srcimg" "$newimg"
+
+# create the new domain
+if [ -n "$cidata" ] && [ "$cidata" != "none" ]; then
+	$SUDO virt-install --quiet --import --name="$dom" \
+		--os-variant=rhel7 --ram="$ram" --vcpus="$ncpu" \
+		--disk path="$newimg",format=qcow2,bus=virtio \
+		--disk path="$cidata",device=cdrom,readonly=on \
+		--network network=default --noautoconsole
+else
+	$SUDO virt-install --quiet --import --name="$dom" \
+		--os-variant=rhel7 --ram="$ram" --vcpus="$ncpu" \
+		--disk path="$newimg",format=qcow2,bus=virtio \
+		--network network=default --noautoconsole
+fi
+
+echo "done!"

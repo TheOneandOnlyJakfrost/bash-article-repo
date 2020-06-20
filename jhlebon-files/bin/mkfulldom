@@ -1,0 +1,49 @@
+#!/bin/bash
+set -euo pipefail
+
+if [ $# -lt 2 ]; then
+	echo "Usage: $0 <name> <source-img> [cidata=generate] [RAM=1536] [NCPU=1]"
+	echo "cidata:  generate:  create a generic cidata"
+	echo "cidata:  none:      don't attach any cidata"
+	echo "cidata:  path=/dir  use meta/user-data from /dir"
+	exit
+fi
+
+name=$1; shift
+srcimg=$1; shift
+
+# defaults
+cidata=generate
+ram=1536
+ncpu=1
+
+if [ $# -gt 0 ]; then
+	cidata=$1; shift
+fi
+
+if [ $# -gt 0 ]; then
+	ram=$1; shift
+fi
+
+if [ $# -gt 0 ]; then
+	ncpu=$1; shift
+fi
+
+if [ ! -f $srcimg ]; then
+	echo "$srcimg does not exist"
+	exit 1
+fi
+
+if [ "$cidata" = generate ]; then
+	cidata=/var/lib/libvirt/images/$name.cidata.iso
+	mkcidata $name-iid $name $cidata
+elif [[ $cidata == path=* ]]; then
+	cidatadir=${cidata#path=}
+	cidata=/var/lib/libvirt/images/$name.cidata.iso
+	mkcidata $cidatadir $cidata
+elif [ $cidata != none ]; then
+	echo "Invalid cidata option $cidata"
+	exit 1
+fi
+
+mkdom $name $srcimg $cidata $ram $ncpu

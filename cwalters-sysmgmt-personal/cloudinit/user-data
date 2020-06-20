@@ -1,0 +1,35 @@
+#cloud-config
+
+# I use this cloud-init file as a default secure configuration; no
+# passwords, just ssh keys (ED25519), and a stronger OpenSSH configuration.
+
+# First, ignore the provider's hostnames - unfortunately some of Red Hat's
+# internal OpenStack instances inject broken names.  We'll take care of this
+# on our own.
+preserve_hostname: True
+
+# Configure the user `walters` with my general purpose SSH key, and
+# passwordless sudo.
+users:
+  - name: walters
+    gecos: Colin Walters
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh-authorized-keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOQkQHeKan3X+g1jILw4a3KtcfEIED0kByKGWookU7ev walters+2015-general@verbum.org
+
+# More secure ssh defaults: https://stribika.github.io/2015/01/04/secure-secure-shell.html
+# Also, a tweak for Fedora/Red Hat OpenSSH to *only* generate ED25519 host keys.
+bootcmd:
+  - echo 'AUTOCREATE_SERVER_KEYS=ED25519' >> /etc/sysconfig/sshd
+  - |
+    for line in \
+      "KexAlgorithms curve25519-sha256@libssh.org" \
+      "Ciphers chacha20-poly1305@openssh.com" \
+      "MACs hmac-sha2-512-etm@openssh.com" \
+      "GSSAPIAuthentication no" \
+      "PasswordAuthentication no"; do \
+        if ! grep -q "$line" /etc/ssh/sshd_config; then \
+          echo $line >> /etc/ssh/sshd_config; \
+        fi \
+      done
+    

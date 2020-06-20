@@ -1,0 +1,8 @@
+$include /etc/inputrc
+
+$if Bash
+  TAB: menu-complete
+  ">": complete
+  "[Z": menu-complete-backward
+  Space: magic-space
+$endif
